@@ -21,24 +21,62 @@ class PrenotamiBot {
     console.log('🚀 Starting Prenotami Booking Bot...');
     this.browser = await chromium.launch({
       headless: CONFIG.headless,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] // Required for Railway
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-blink-features=AutomationControlled'
+      ]
     });
-    this.page = await this.browser.newPage();
 
-    // Set viewport and user agent to appear more human-like
-    await this.page.setViewportSize({ width: 1280, height: 720 });
+    const context = await this.browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      viewport: { width: 1280, height: 720 },
+      locale: 'it-IT',
+      timezoneId: 'Europe/Rome'
+    });
+
+    this.page = await context.newPage();
+
     await this.page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9,it;q=0.8'
+      'Accept-Language': 'it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7'
     });
   }
 
   async navigateToSite() {
     console.log('📍 Navigating to', CONFIG.url);
-    await this.page.goto(CONFIG.url, {
-      waitUntil: 'networkidle',
-      timeout: 30000
-    });
-    await this.randomDelay(1000, 3000);
+
+    // Try multiple strategies to load the page
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    while (attempts < maxAttempts) {
+      try {
+        attempts++;
+        console.log(`⏳ Navigation attempt ${attempts}/${maxAttempts}...`);
+
+        // Try with longer timeout and different wait strategies
+        await this.page.goto(CONFIG.url, {
+          waitUntil: 'domcontentloaded', // Less strict than networkidle
+          timeout: 60000 // Increased to 60 seconds
+        });
+
+        // Wait a bit for any dynamic content
+        await this.randomDelay(3000, 5000);
+
+        console.log('✅ Page loaded successfully');
+        return;
+
+      } catch (error) {
+        console.log(`⚠️  Attempt ${attempts} failed: ${error.message}`);
+
+        if (attempts < maxAttempts) {
+          console.log(`⏳ Retrying in 10 seconds...`);
+          await this.randomDelay(10000, 15000);
+        } else {
+          throw new Error(`Failed to load page after ${maxAttempts} attempts`);
+        }
+      }
+    }
   }
 
   async login() {
