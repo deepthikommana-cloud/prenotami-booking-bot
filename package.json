@@ -1,0 +1,27 @@
+{
+  "name": "prenotami-booking-bot",
+  "version": "1.0.0",
+  "description": "Automated bot for booking appointments on prenotami.esteri.it",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "HEADLESS=false node bot.js",
+    "inspect": "node inspector.js",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "keywords": [
+    "booking",
+    "automation",
+    "playwright"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.42.0",
+    "dotenv": "^16.4.5",
+    "node-fetch": "^3.3.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
