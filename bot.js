@@ -7,7 +7,7 @@ const CONFIG = {
   password: process.env.PASSWORD || '',
   headless: process.env.HEADLESS !== 'false',
   checkInterval: parseInt(process.env.CHECK_INTERVAL) || 60000, // 1 minute default
-  maxRetries: parseInt(process.env.MAX_RETRIES) || 10,
+  maxRetries: parseInt(process.env.MAX_RETRIES) || Infinity, // Run continuously by default
 };
 
 class PrenotamiBot {
@@ -63,7 +63,11 @@ class PrenotamiBot {
         // Wait a bit for any dynamic content
         await this.randomDelay(3000, 5000);
 
+        const currentUrl = this.page.url();
+        const title = await this.page.title();
         console.log('✅ Page loaded successfully');
+        console.log('📍 Current URL:', currentUrl);
+        console.log('📄 Page title:', title);
         return;
 
       } catch (error) {
@@ -177,7 +181,12 @@ class PrenotamiBot {
 
       // Wait for navigation after login
       await this.page.waitForLoadState('networkidle', { timeout: 10000 });
+
+      const currentUrl = this.page.url();
+      const title = await this.page.title();
       console.log('✅ Login successful');
+      console.log('📍 Current URL:', currentUrl);
+      console.log('📄 Page title:', title);
 
     } catch (error) {
       console.error('❌ Login failed:', error.message);
@@ -205,6 +214,11 @@ class PrenotamiBot {
           await this.page.click(selector, { timeout: 3000 });
           console.log('✅ Clicked Book/Prenota button');
           await this.randomDelay(2000, 3000);
+
+          const currentUrl = this.page.url();
+          const title = await this.page.title();
+          console.log('📍 Current URL:', currentUrl);
+          console.log('📄 Page title:', title);
           return true;
         } catch (e) {
           // Try next selector
@@ -238,6 +252,11 @@ class PrenotamiBot {
           await element.click({ timeout: 3000 });
           console.log('✅ Clicked Schengen appointment link');
           await this.randomDelay(2000, 3000);
+
+          const currentUrl = this.page.url();
+          const title = await this.page.title();
+          console.log('📍 Current URL:', currentUrl);
+          console.log('📄 Page title:', title);
           return true;
         } catch (e) {
           // Try next selector
@@ -257,49 +276,97 @@ class PrenotamiBot {
     console.log('🔎 Checking for available appointments...');
 
     try {
+      // Get page context
+      const currentUrl = this.page.url();
+      const title = await this.page.title();
+      console.log('📍 Checking availability at URL:', currentUrl);
+      console.log('📄 Page title:', title);
+
       // Look for availability indicators
       const content = await this.page.content();
+      const visibleText = await this.page.textContent('body').catch(() => '');
+
+      console.log('📊 Page content length:', content.length, 'characters');
+      console.log('📝 Visible text length:', visibleText.length, 'characters');
+
+      // Log a snippet of visible text for debugging
+      const textSnippet = visibleText.substring(0, 500).replace(/\s+/g, ' ').trim();
+      console.log('📖 Text snippet (first 500 chars):', textSnippet);
 
       // Check for common availability patterns
       const availabilityPatterns = [
-        /disponibil/i, // "available" in Italian
-        /available/i,
-        /prenota/i,
-        /book now/i,
-        /slot.*available/i
+        { pattern: /disponibil/i, name: 'disponibil (available in Italian)' },
+        { pattern: /available/i, name: 'available' },
+        { pattern: /prenota/i, name: 'prenota (book in Italian)' },
+        { pattern: /book now/i, name: 'book now' },
+        { pattern: /slot.*available/i, name: 'slot available' }
       ];
 
-      for (const pattern of availabilityPatterns) {
+      console.log('🔍 Checking for availability patterns...');
+      for (const { pattern, name } of availabilityPatterns) {
         if (pattern.test(content)) {
+          const match = content.match(pattern);
+          const matchContext = this.getMatchContext(content, match.index, 100);
+          console.log(`✅ MATCH FOUND: "${name}"`);
+          console.log(`📌 Matched text: "${match[0]}"`);
+          console.log(`📍 Context: "...${matchContext}..."`);
           console.log('🎉 AVAILABILITY FOUND!');
           await this.takeScreenshot('availability-found');
-          return true;
+
+          // Return detailed availability info for notifications
+          return {
+            found: true,
+            url: currentUrl,
+            pageTitle: title,
+            matchedText: match[0],
+            context: matchContext,
+            patternName: name
+          };
         }
       }
+
+      console.log('❌ No availability patterns matched');
 
       // Check for "no availability" messages
       const noAvailabilityPatterns = [
-        /non.*disponibil/i,
-        /no.*available/i,
-        /nessun.*appuntamento/i,
-        /no.*appointment/i
+        { pattern: /non.*disponibil/i, name: 'non disponibil' },
+        { pattern: /no.*available/i, name: 'no available' },
+        { pattern: /nessun.*appuntamento/i, name: 'nessun appuntamento' },
+        { pattern: /no.*appointment/i, name: 'no appointment' }
       ];
 
-      for (const pattern of noAvailabilityPatterns) {
+      console.log('🔍 Checking for "no availability" patterns...');
+      for (const { pattern, name } of noAvailabilityPatterns) {
         if (pattern.test(content)) {
+          const match = content.match(pattern);
+          const matchContext = this.getMatchContext(content, match.index, 100);
+          console.log(`✅ MATCH FOUND: "${name}"`);
+          console.log(`📌 Matched text: "${match[0]}"`);
+          console.log(`📍 Context: "...${matchContext}..."`);
           console.log('❌ No appointments available');
-          return false;
+          return { found: false };
         }
       }
 
-      console.log('⚠️  Could not determine availability');
+      console.log('⚠️  Could not determine availability - no patterns matched');
+      console.log('💡 This might mean:');
+      console.log('   - The page structure is different than expected');
+      console.log('   - Need to click more buttons to see availability');
+      console.log('   - The selectors need updating');
       await this.takeScreenshot('availability-unknown');
-      return false;
+      return { found: false };
 
     } catch (error) {
       console.error('❌ Error checking availability:', error.message);
-      return false;
+      console.error('📍 Stack trace:', error.stack);
+      return { found: false };
     }
+  }
+
+  getMatchContext(text, index, contextLength) {
+    const start = Math.max(0, index - contextLength);
+    const end = Math.min(text.length, index + contextLength);
+    return text.substring(start, end).replace(/\s+/g, ' ').trim();
   }
 
   async takeScreenshot(name) {
@@ -333,18 +400,24 @@ class PrenotamiBot {
       await this.selectSchengenAppointment();
       await this.takeScreenshot('after-schengen-select');
 
-      const available = await this.checkAvailability();
+      const availabilityResult = await this.checkAvailability();
 
-      if (available) {
+      if (availabilityResult.found) {
         console.log('🎉 SUCCESS! Appointment available!');
-        // Keep browser open if appointment found
         console.log('⏸️  Browser will remain open for manual booking');
-        if (process.env.WEBHOOK_URL) {
-          await this.sendNotification('Appointment available!');
-        }
+
+        // Send notification with detailed information
+        await this.sendNotification('Appointment available!', {
+          url: availabilityResult.url,
+          pageTitle: availabilityResult.pageTitle,
+          matchedText: availabilityResult.matchedText,
+          context: availabilityResult.context
+        });
+
         return true;
       } else {
         console.log('⏳ No appointments available, will retry...');
+        // Don't send notification for "no availability"
         return false;
       }
 
@@ -355,17 +428,210 @@ class PrenotamiBot {
     }
   }
 
-  async sendNotification(message) {
+  async sendNotification(message, details = {}) {
+    console.log('📢 Sending notifications...');
+
+    const notificationData = {
+      message,
+      url: details.url || this.page?.url(),
+      timestamp: new Date().toISOString(),
+      pageTitle: details.pageTitle || '',
+      matchedText: details.matchedText || '',
+      context: details.context || ''
+    };
+
+    // Try all configured notification methods
+    const notifications = [];
+
+    // 1. Webhook notification (Slack, Discord, etc.)
+    if (process.env.WEBHOOK_URL) {
+      notifications.push(this.sendWebhookNotification(notificationData));
+    }
+
+    // 2. Email notification
+    if (process.env.EMAIL_TO && process.env.EMAIL_FROM) {
+      notifications.push(this.sendEmailNotification(notificationData));
+    }
+
+    // 3. SMS notification (Twilio)
+    if (process.env.TWILIO_PHONE_TO && process.env.TWILIO_PHONE_FROM) {
+      notifications.push(this.sendSMSNotification(notificationData));
+    }
+
+    // 4. Telegram notification
+    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+      notifications.push(this.sendTelegramNotification(notificationData));
+    }
+
+    if (notifications.length === 0) {
+      console.log('⚠️  No notification methods configured');
+      console.log('💡 Set WEBHOOK_URL, EMAIL credentials, TWILIO credentials, or TELEGRAM credentials in environment variables');
+      return;
+    }
+
+    const results = await Promise.allSettled(notifications);
+    const successful = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.filter(r => r.status === 'rejected').length;
+
+    console.log(`✅ Notifications sent: ${successful} successful, ${failed} failed`);
+  }
+
+  async sendWebhookNotification(data) {
     try {
       const fetch = (await import('node-fetch')).default;
+
+      // Format for common webhook services
+      const payload = {
+        text: `🎉 ${data.message}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*🎉 ${data.message}*`
+            }
+          },
+          {
+            type: 'section',
+            fields: [
+              {
+                type: 'mrkdwn',
+                text: `*URL:*\n${data.url}`
+              },
+              {
+                type: 'mrkdwn',
+                text: `*Time:*\n${new Date(data.timestamp).toLocaleString()}`
+              }
+            ]
+          }
+        ]
+      };
+
+      if (data.matchedText) {
+        payload.blocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Matched Text:*\n\`${data.matchedText}\``
+          }
+        });
+      }
+
+      if (data.context) {
+        payload.blocks.push({
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Context:*\n\`\`\`${data.context}\`\`\``
+          }
+        });
+      }
+
       await fetch(process.env.WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: message })
+        body: JSON.stringify(payload)
       });
-      console.log('📢 Notification sent');
+      console.log('✅ Webhook notification sent');
     } catch (error) {
-      console.error('❌ Failed to send notification:', error.message);
+      console.error('❌ Failed to send webhook notification:', error.message);
+      throw error;
+    }
+  }
+
+  async sendEmailNotification(data) {
+    try {
+      const nodemailer = require('nodemailer');
+
+      const transporter = nodemailer.createTransport({
+        host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+        port: parseInt(process.env.EMAIL_PORT || '587'),
+        secure: process.env.EMAIL_SECURE === 'true',
+        auth: {
+          user: process.env.EMAIL_FROM,
+          pass: process.env.EMAIL_PASSWORD
+        }
+      });
+
+      const emailBody = `
+        <h2>🎉 ${data.message}</h2>
+        <p><strong>Time:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
+        <p><strong>URL:</strong> <a href="${data.url}">${data.url}</a></p>
+        ${data.pageTitle ? `<p><strong>Page Title:</strong> ${data.pageTitle}</p>` : ''}
+        ${data.matchedText ? `<p><strong>Matched Text:</strong> <code>${data.matchedText}</code></p>` : ''}
+        ${data.context ? `<p><strong>Context:</strong></p><pre>${data.context}</pre>` : ''}
+        <hr>
+        <p><em>Sent by Prenotami Booking Bot</em></p>
+      `;
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_FROM,
+        to: process.env.EMAIL_TO,
+        subject: `🎉 ${data.message}`,
+        html: emailBody
+      });
+
+      console.log('✅ Email notification sent');
+    } catch (error) {
+      console.error('❌ Failed to send email notification:', error.message);
+      throw error;
+    }
+  }
+
+  async sendSMSNotification(data) {
+    try {
+      const twilio = require('twilio');
+
+      const client = twilio(
+        process.env.TWILIO_ACCOUNT_SID,
+        process.env.TWILIO_AUTH_TOKEN
+      );
+
+      const smsBody = `🎉 ${data.message}\n\nURL: ${data.url}\nTime: ${new Date(data.timestamp).toLocaleString()}`;
+
+      await client.messages.create({
+        body: smsBody,
+        from: process.env.TWILIO_PHONE_FROM,
+        to: process.env.TWILIO_PHONE_TO
+      });
+
+      console.log('✅ SMS notification sent');
+    } catch (error) {
+      console.error('❌ Failed to send SMS notification:', error.message);
+      throw error;
+    }
+  }
+
+  async sendTelegramNotification(data) {
+    try {
+      const fetch = (await import('node-fetch')).default;
+
+      const message = `
+🎉 *${data.message}*
+
+*URL:* ${data.url}
+*Time:* ${new Date(data.timestamp).toLocaleString()}
+${data.pageTitle ? `*Page:* ${data.pageTitle}` : ''}
+${data.matchedText ? `*Matched:* \`${data.matchedText}\`` : ''}
+${data.context ? `\n\`\`\`\n${data.context}\n\`\`\`` : ''}
+      `.trim();
+
+      const telegramUrl = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+
+      await fetch(telegramUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: process.env.TELEGRAM_CHAT_ID,
+          text: message,
+          parse_mode: 'Markdown'
+        })
+      });
+
+      console.log('✅ Telegram notification sent');
+    } catch (error) {
+      console.error('❌ Failed to send Telegram notification:', error.message);
+      throw error;
     }
   }
 
@@ -391,7 +657,8 @@ async function main() {
 
   while (bot.retryCount < CONFIG.maxRetries && !foundAppointment) {
     try {
-      console.log(`\n🔄 Attempt ${bot.retryCount + 1}/${CONFIG.maxRetries}`);
+      const maxRetriesDisplay = CONFIG.maxRetries === Infinity ? '∞' : CONFIG.maxRetries;
+      console.log(`\n🔄 Attempt ${bot.retryCount + 1}/${maxRetriesDisplay}`);
       foundAppointment = await bot.run();
 
       if (!foundAppointment) {
@@ -417,7 +684,11 @@ async function main() {
   }
 
   if (!foundAppointment) {
-    console.log('❌ Max retries reached. Exiting...');
+    if (CONFIG.maxRetries === Infinity) {
+      console.log('⚠️  Bot stopped without finding appointment (unexpected exit from infinite loop)');
+    } else {
+      console.log('❌ Max retries reached. Exiting...');
+    }
     await bot.cleanup();
     process.exit(1);
   }
